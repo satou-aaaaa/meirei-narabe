@@ -422,6 +422,20 @@ try {
       check("正解すると、通った道が点線の枠と順の数で出て、ロボットは止まった所にいる", tr[0] >= 1 && tr[1], tr.join(","));
       await q.context().close();
     }
+    // ヒント2：その日の問題に頼らず、データから選び肢3つ以上の問題を選んで確かめる（2026-11-07 共通化。日によって検査が動かないのを防ぐ）
+    {
+      const q = await newPage(390); await closeHow(q); await q.click("#go-e"); await q.waitForTimeout(150);
+      const tag = await q.evaluate(() => __km.ALLKEYS.find((t) => { const P = __km.G.make(t); return P && P.opts.length >= 3; }));
+      await q.evaluate((t) => { __km.save((x) => { x.runs.e.list[x.runs.e.res.length] = t; }); __km.play(); }, tag);
+      await q.waitForTimeout(150);
+      await q.click("#hint"); await q.click("#hint");
+      const two = await q.locator(".ch:not(.ng)").count();
+      await q.click(`.ch:not(.ng)[data-j="${await q.evaluate(() => { const c = __km.cur(); return c.P.opts.findLastIndex((o) => o !== c.P.ans); })}"]`);
+      const one = await q.locator(".ch:not(.ng)").count();
+      const ok = await q.evaluate(() => { const c = __km.cur(); return [...document.querySelectorAll(".ch:not(.ng)")].map((b) => c.P.opts[+b.dataset.j]).join() === c.P.ans; });
+      check("ヒント2（データから選んだ選び肢3つ以上の問題）：2つにしぼり、残ったまちがいを選んでも消した選び肢は戻らず正解だけが残る", !!tag && two === 2 && one === 1 && ok, `${tag} ${two} ${one}`);
+      await q.context().close();
+    }
     check("幅320px・とても大きい文字でも横にはみ出さない", bad.length === 0, bad.join(" / "));
     check("押せる所は高さ44px以上", small.length === 0, [...new Set(small)].slice(0, 8).join(","));
   }
