@@ -701,9 +701,10 @@ function play() {
   if ($("quit")) $("quit").onclick = () => finish(); // 正解のあとでも降りられる（2026-11-07 CodeRabbit。endFinish は正解済みの問題を数える）
   paint();
   toTop();
+  const q = $("q"); if (q) { q.setAttribute("tabindex", "-1"); q.focus({ preventScroll: true }); } // 次の問題へ進んでもキーボードと読み上げが問題文から続く（2026-11-07 saibanin-shikumi #1 の CodeRabbit）
 }
-// ヒント2：まちがいの選び肢を消して、2つまでにしぼる（消す順は選び肢の並びの順）
-const cutOf = () => { if (cur.hints < 2) return []; const left = cur.P.opts.filter((t) => t !== cur.P.ans && !cur.wrong.includes(t)); return left.slice(0, Math.max(0, left.length - 1)); };
+// ヒント2：まちがいの選び肢を消して、2つまでにしぼる（消すのは並びの最後の1つを除いたまちがい。まちがえた数で変えない＝消した選び肢が戻らない。incidents/2026-11-07-hint-cut-comes-back.md）
+const cutOf = () => (cur.hints < 2 ? [] : cur.P.opts.filter((t) => t !== cur.P.ans).slice(0, -1));
 function paint() {
   const cut = cutOf();
   document.querySelectorAll(".ch").forEach((b) => { const t = cur.P.opts[+b.dataset.j], ng = cur.wrong.includes(t) || cut.includes(t); b.classList.toggle("ng", ng); b.disabled = ng || cur.done; b.setAttribute("aria-label", t + (ng ? "（ちがう）" : "")); });
