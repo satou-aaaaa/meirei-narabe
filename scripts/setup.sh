@@ -4,7 +4,7 @@
 # Claude Code のクラウドセッションでは .claude/settings.json の SessionStart フックが自動で呼ぶ。
 # CI の Setup check（共通部品）が、まっさらな環境でこれが通るかを確かめる。
 # ひな形: satou-aaaaa/shared-workflows の template/scripts/setup.sh。ゲームはそのまま写せば動く（npm_dir と next だけ、ちがえば書き換える）。
-# ひな形の版: 10（上げたら写しの版も上げる。scripts/drift-check.mjs が古い写しを週次まとめに出す）
+# ひな形の版: 11（上げたら写しの版も上げる。scripts/drift-check.mjs が古い写しを週次まとめに出す）
 #   2: 依存は毎回 npm ci・ブラウザが無ければ止める・このシェルで要る操作（nvm use・export）を最後に出す（shared-workflows incidents/2026-11-03-setup-false-ready.md）
 #   3: nvm.sh を --no-use で読む（.nvmrc の版が入っていないと、読んだだけで何も言わずに止まっていた。incidents/2026-11-04-setup-nvm-silent-stop.md）
 #   4: ブラウザの場所はファイルかも見る（-x だけだとフォルダでも通った。2026-11-05 CodeRabbit が bunshi-tsukuri #1 で指摘）
@@ -19,6 +19,7 @@
 #  10: .nvmrc の先頭の数字（メジャー版）だけを読む（22.11.0 が 22110 になっていた）・nvm install の失敗で止めて知らせる・
 #      依存を使い回すのは QA と同じ import() で Playwright を読めるときだけ（ESM の入口が欠けても通っていた）・
 #      2つ同時に動いても npm ci を重ねない（ロック）・Git Bash では CHROMIUM_PATH を Windows の形に直す（2026-11-07 shared-workflows #219）
+#  11: 強制終了で残ったロックは、同じ機械で持ち主が動いていなければ外す（10分待って止まっていた。#259）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -72,16 +73,23 @@ deps_ok() { [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$sum" ] && (cd "$npm_dir" 
 # 2つのセッションが同時に動いても npm ci を重ねない（片方が入れている node_modules をもう片方が消す。版10）
 lock="$npm_dir/.setup-lock"
 got=""
-for _ in $(seq 1 600); do if mkdir "$lock" 2>/dev/null; then got=1; break; fi; sleep 1; done
-[ -n "$got" ] || fail "$lock が10分消えない（ほかの setup.sh が止まったまま。動いていなければ rmdir $lock）"   # 取れなかったら進まない・人のロックを消さない
-trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+me="$(hostname 2>/dev/null || echo local) $$"
+# 持ち主（同じ機械で、もう動いていない）が強制終了で残したロックだけを外す。別の機械・名札の無いロックは外さない（版11の CodeRabbit）
+stale() { local o; o=$(cat "$lock/owner" 2>/dev/null) || return 1; [ "${o% *}" = "${me% *}" ] && ! kill -0 "${o##* }" 2>/dev/null; }
+for _ in $(seq 1 600); do
+  if mkdir "$lock" 2>/dev/null; then echo "$me" > "$lock/owner"; got=1; break; fi
+  if stale; then echo "前の setup.sh が残したロックを外す（$(cat "$lock/owner" 2>/dev/null)）"; rm -f "$lock/owner"; rmdir "$lock" 2>/dev/null; continue; fi
+  sleep 1
+done
+[ -n "$got" ] || fail "$lock が10分消えない（ほかの setup.sh が止まったまま。動いていなければ rm -r $lock）"   # 取れなかったら進まない・人のロックを消さない
+trap 'rm -f "$lock/owner"; rmdir "$lock" 2>/dev/null || true' EXIT
 if deps_ok; then
   echo "依存は lock どおりに入っている（入れ直さない）"
 else
   (cd "$npm_dir" && npm ci --include=dev --no-audit --no-fund)   # NODE_ENV=production でも検査の道具（devDependencies）を入れる（版6）
   echo "$sum" > "$stamp"
 fi
-rmdir "$lock" 2>/dev/null || true
+rm -f "$lock/owner"; rmdir "$lock" 2>/dev/null || true
 trap - EXIT   # 返したあとは、あとから来た setup.sh のロックを終わりに消さない
 
 # Playwright のブラウザ。検査は CHROMIUM_PATH があればそれを、無ければ Playwright の置き場のものを使う
