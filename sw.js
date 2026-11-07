@@ -9,7 +9,7 @@
 //      保存したものは自分の版（cacheName）からだけ探す・入れるときは HTTP の保存を通さない（cache: "reload"）・
 //      長い受信でも保存し直しが終わるまで waitUntil で待つ
 // game:begin
-const CACHE = "meirei-v2";
+const CACHE = "meirei-v3";
 const SHELL = ["./", "./index.html", "./gen.js", "./transfer.js", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 // game:end
 
@@ -78,6 +78,8 @@ self.addEventListener("fetch", (e) => {
     arm();
     fetch(req).then((res) => {
       clearTimeout(first); arm();
+      // 本文を持てない返事（リダイレクト＝status 0・204・205・304）は作り直さずそのまま返す（作り直すと例外になり、末尾の / の無い URL が開けない。版11の CodeRabbit）
+      if (res.status === 0 || res.status === 204 || res.status === 205 || res.status === 304) { send(res); return done(); }
       return readAll(res, fallback, arm).then((buf) => {
         const make = () => new Response(buf, { status: res.status, statusText: res.statusText, headers: res.headers });
         if (res.ok) {
@@ -85,10 +87,11 @@ self.addEventListener("fetch", (e) => {
           if (!KEEP.has(url.pathname)) return done();
           return caches.open(CACHE).then((c) => c.put(url.pathname, make())).catch(() => {}).then(done);
         }
-        done();
-        if (res.status >= 500) return fromCache().then((hit) => send(hit || make()));
+        // 控えの検索が止まっても cap の時計で返すよう、返してから時計を止める（版11の CodeRabbit）
+        if (res.status >= 500) return fromCache().then((hit) => send(hit || make())).then(done);
         send(make());
+        done();
       });
-    }).catch(() => { done(); return fromCache().then((hit) => send(hit || Response.error())); });
+    }).catch(() => fromCache().then((hit) => send(hit || Response.error())).then(done));
   }));
 });

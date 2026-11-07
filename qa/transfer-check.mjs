@@ -189,21 +189,23 @@ export async function checkTransfer({ browser, url, game, sample, check, open })
 
   // 8. 書き込みが失敗しても記録が消えない（版10。meirei-narabe #1・hyakunin-awase #1 の CodeRabbit）
   const D = await browser.newContext({ viewport: { width: 375, height: 740 } });
-  // 印（sessionStorage の hk-fail）に書いた条件のときだけ setItem を失敗させる：値が取り込む記録と同じ・キーが控えの途中（hk-prev:）
-  await D.addInitScript(() => { const o = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { const f = JSON.parse(sessionStorage.getItem("hk-fail") || "null"); if (this === localStorage && f && ((f.v != null && v === f.v) || (f.k && String(k).startsWith(f.k)))) throw new DOMException("full", "QuotaExceededError"); return o.call(this, k, v); }; });
+  // 印（sessionStorage の hk-fail）に書いた条件のときだけ setItem を失敗させる：値が取り込む記録と同じ・キーが控えの途中（hk-prev:）。then があれば、失敗の前にほかのタブの書き込み（then のキーと値）をまねる
+  await D.addInitScript(() => { const o = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { const f = JSON.parse(sessionStorage.getItem("hk-fail") || "null"); if (this === localStorage && f && ((f.v != null && v === f.v) || (f.k && String(k).startsWith(f.k)))) { if (f.then) o.call(this, f.then[0], f.then[1]); throw new DOMException("full", "QuotaExceededError"); } return o.call(this, k, v); }; });
   const pd = watch(await D.newPage());
   await pd.goto(url);
   await pd.evaluate((s) => { localStorage.clear(); for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, before);
   await pd.reload();
   await pd.waitForTimeout(300);
   const dBefore = JSON.stringify(await dump(pd));
-  const wantVal = JSON.parse(want)[firstKey];
+  // 取り込む記録にあるキーで失敗させる（無いキーだと何も失敗せず、検査が何も見ないまま通る。版11）
+  const failKey = firstKey in JSON.parse(want) ? firstKey : Object.keys(JSON.parse(want))[0];
+  const wantVal = JSON.parse(want)[failKey];
   await pd.evaluate((v) => sessionStorage.setItem("hk-fail", JSON.stringify({ v })), wantVal);
   await pd.evaluate((c) => { location.hash = "hk=" + c; }, code);
   await pd.waitForSelector("#hk-yes");
   await Promise.all([pd.waitForEvent("load"), pd.click("#hk-yes")]);
   await pd.waitForTimeout(300);
-  check("引き継ぎ：取り込みの書き込みが失敗したら、記録は元のまま", wantVal === undefined || JSON.stringify(await dump(pd)) === dBefore, JSON.stringify(await dump(pd)).slice(0, 80));
+  check("引き継ぎ：取り込みの書き込みが失敗したら、記録は元のまま", wantVal !== undefined && JSON.stringify(await dump(pd)) === dBefore, JSON.stringify(await dump(pd)).slice(0, 80));
   // 入れ替えの番号（hk-sync:）を書けなければ入れ替えない（古いタブが上書きしうる。#252 の CodeRabbit）
   await pd.evaluate(() => sessionStorage.setItem("hk-fail", JSON.stringify({ k: "hk-sync:" })));
   await pd.evaluate((c) => { location.hash = "hk=" + c; }, code);
@@ -227,6 +229,98 @@ export async function checkTransfer({ browser, url, game, sample, check, open })
   await pd.waitForTimeout(300);
   check("引き継ぎ：控えに戻す前の記録を書けなければ、戻さない（記録が消えない）", JSON.stringify(await dump(pd)) === dNow);
   await pd.evaluate(() => sessionStorage.removeItem("hk-fail"));
+  // 途中で止まって残った戻す前の記録（hk-prev:）が壊れていたら使わず、いまの記録を控えにする（版11。nijushi-sekki #4 の CodeRabbit）
+  const sorted = (d) => JSON.stringify(Object.fromEntries(Object.entries(d || {}).filter(([k]) => k in sample).sort()));
+  // 入れ替えの番号（hk-sync:）は消さない（消すと、このタブは古いタブとみなされ、ここで書いた記録を捨てて読み直す）
+  const putRec = (page, rec, extra) => page.evaluate(([s, x, g]) => { const n = localStorage.getItem("hk-sync:" + g); localStorage.clear(); if (n != null) localStorage.setItem("hk-sync:" + g, n); for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); for (const [k, v] of Object.entries(x)) localStorage.setItem(k, v); }, [rec, extra, game]);
+  await putRec(pd, before, { ["hk-backup:" + game]: JSON.stringify({ at: new Date().toISOString(), d: JSON.parse(want) }) });
+  await pd.reload();
+  await pd.waitForTimeout(300);
+  await pd.evaluate((g) => localStorage.setItem("hk-prev:" + g, "{こわれた"), game);
+  if (await pd.locator("#hk-toast-close").count()) await pd.click("#hk-toast-close");
+  await openBox(pd);
+  await pd.click("#hk-undo");
+  // ゲームは読み込みのあと記録を整えて書き直すので、戻す直前の記録と比べる
+  const nb = JSON.stringify(await dump(pd));
+  await Promise.all([pd.waitForEvent("load"), pd.click("#hk-yes")]);
+  await pd.waitForTimeout(300);
+  const bk1 = await pd.evaluate((g) => { try { return JSON.parse(localStorage.getItem("hk-backup:" + g) || "null"); } catch (e) { return null; } }, game);
+  check("引き継ぎ：残った戻す前の記録が壊れていても、控えに戻すと、いまの記録が控えに残る", JSON.stringify(await dump(pd)) === want && !!bk1 && sorted(bk1.d) === nb && (await pd.evaluate((g) => localStorage.getItem("hk-prev:" + g), game)) === null, JSON.stringify(bk1).slice(0, 80));
+  // 途中で止まったあとに記録が変わっていたら、残った記録へ戻すときも、いまの記録を控えにする（版11。meirei-narabe #4 の CodeRabbit）
+  await putRec(pd, before, { ["hk-prev:" + game]: JSON.stringify({ at: new Date().toISOString(), d: JSON.parse(want) }), ["hk-backup:" + game]: JSON.stringify({ at: new Date().toISOString(), d: {} }), ["hk-prevfp:" + game]: "止まったときの印" });
+  await pd.reload();
+  await pd.waitForTimeout(300);
+  if (await pd.locator("#hk-toast-close").count()) await pd.click("#hk-toast-close");
+  await openBox(pd);
+  await pd.click("#hk-undo");
+  const nb2 = JSON.stringify(await dump(pd));
+  await Promise.all([pd.waitForEvent("load"), pd.click("#hk-yes")]);
+  await pd.waitForTimeout(300);
+  const bk2 = await pd.evaluate((g) => JSON.parse(localStorage.getItem("hk-backup:" + g) || "null"), game);
+  check("引き継ぎ：止まったあとに遊んだ記録は、残った記録へ戻しても控えに残る（上書きで消えない）", JSON.stringify(await dump(pd)) === want && !!bk2 && sorted(bk2.d) === nb2, JSON.stringify(bk2).slice(0, 80));
+  // 止まって戻す前の記録が残ったまま、別の記録を取り込んだら、「控えに戻す」はその取り込みの前の記録へ戻す（版11。akushitsu-miyaburi #4 の CodeRabbit）
+  await putRec(pd, before, { ["hk-prev:" + game]: JSON.stringify({ at: new Date(Date.now() - 3600e3).toISOString(), d: {} }) });
+  await pd.reload();
+  await pd.waitForTimeout(300);
+  if (await pd.locator("#hk-toast-close").count()) await pd.click("#hk-toast-close");
+  const nb3 = JSON.stringify(await dump(pd));
+  await pd.evaluate((c) => { location.hash = "hk=" + c; }, code);
+  await pd.waitForSelector("#hk-yes");
+  await Promise.all([pd.waitForEvent("load"), pd.click("#hk-yes")]);
+  await pd.waitForTimeout(300);
+  if (await pd.locator("#hk-toast-close").count()) await pd.click("#hk-toast-close");
+  await openBox(pd);
+  await pd.click("#hk-undo");
+  await Promise.all([pd.waitForEvent("load"), pd.click("#hk-yes")]);
+  await pd.waitForTimeout(300);
+  check("引き継ぎ：止まって残った記録があっても、あとで取り込んだら、控えに戻すとその前の記録になる", sorted(await dump(pd)) === sorted(JSON.parse(nb3)), JSON.stringify(await dump(pd)).slice(0, 80));
+  // 入れ替えの番号は、入れ替えに失敗したら元に戻す（記録は変わらないのに、ほかのタブの保存が捨てられる。版11）
+  await putRec(pd, before, {});
+  await pd.reload();
+  await pd.waitForTimeout(300);
+  const s0 = await pd.evaluate((g) => localStorage.getItem("hk-sync:" + g), game);
+  await pd.evaluate(() => sessionStorage.setItem("hk-fail", JSON.stringify({ k: "hk-backup:" })));
+  await pd.evaluate((c) => { location.hash = "hk=" + c; }, code);
+  await pd.waitForSelector("#hk-yes");
+  await Promise.all([pd.waitForEvent("load"), pd.click("#hk-yes")]);
+  await pd.waitForTimeout(300);
+  await pd.evaluate(() => sessionStorage.removeItem("hk-fail"));
+  check("引き継ぎ：控えを書けずに入れ替えなかったら、入れ替えの番号も元のまま", (await pd.evaluate((g) => localStorage.getItem("hk-sync:" + g), game)) === s0 && JSON.stringify(await dump(pd)) !== want);
+  if (await pd.locator("#hk-toast-close").count()) await pd.click("#hk-toast-close");
+  // そのあいだにほかのタブが番号を進めていたら、戻さない（戻すと、そのタブの入れ替えの前に開いた古いタブが保存できる。版11。#259 の CodeRabbit）
+  await pd.evaluate((g) => sessionStorage.setItem("hk-fail", JSON.stringify({ k: "hk-backup:", then: ["hk-sync:" + g, "ほかのタブ.1"] })), game);
+  await pd.evaluate((c) => { location.hash = "hk=" + c; }, code);
+  await pd.waitForSelector("#hk-yes");
+  await Promise.all([pd.waitForEvent("load"), pd.click("#hk-yes")]);
+  await pd.waitForTimeout(300);
+  await pd.evaluate(() => sessionStorage.removeItem("hk-fail"));
+  check("引き継ぎ：入れ替えに失敗しても、ほかのタブが進めた番号は戻さない", (await pd.evaluate((g) => localStorage.getItem("hk-sync:" + g), game)) === "ほかのタブ.1");
+  if (await pd.locator("#hk-toast-close").count()) await pd.click("#hk-toast-close");
+  // 控えに戻す前に、前の止まったときの印（hk-prevfp:）を消す。古い印が残ると、次に止まったあとの記録を控えに残さないことがある（版11。#259 の CodeRabbit）
+  await putRec(pd, before, { ["hk-backup:" + game]: JSON.stringify({ at: new Date().toISOString(), d: JSON.parse(want) }), ["hk-prevfp:" + game]: "前の印" });
+  await pd.reload();
+  await pd.waitForTimeout(300);
+  if (await pd.locator("#hk-toast-close").count()) await pd.click("#hk-toast-close");
+  await pd.evaluate(() => sessionStorage.setItem("hk-fail", JSON.stringify({ k: "hk-backup:" })));
+  await openBox(pd);
+  await pd.click("#hk-undo");
+  await Promise.all([pd.waitForEvent("load"), pd.click("#hk-yes")]);
+  await pd.waitForTimeout(300);
+  await pd.evaluate(() => sessionStorage.removeItem("hk-fail"));
+  check("引き継ぎ：控えに戻すとき、前に止まったときの古い印を残さない", (await pd.evaluate((g) => localStorage.getItem("hk-prevfp:" + g), game)) === null);
+  if (await pd.locator("#hk-toast-close").count()) await pd.click("#hk-toast-close");
+  // 止まったときの印が無い（書けなかった）まま残った記録へ戻すときは、控え（元の記録のただ1つの写しかもしれない）を上書きしない（版11。#259 の CodeRabbit）
+  const b0 = JSON.stringify({ at: new Date(Date.now() - 3600e3).toISOString(), d: { [firstKey]: "前の控え" } });
+  await putRec(pd, before, { ["hk-prev:" + game]: JSON.stringify({ at: new Date().toISOString(), d: JSON.parse(want) }), ["hk-backup:" + game]: b0 });
+  await pd.reload();
+  await pd.waitForTimeout(300);
+  if (await pd.locator("#hk-toast-close").count()) await pd.click("#hk-toast-close");
+  await openBox(pd);
+  await pd.click("#hk-undo");
+  await Promise.all([pd.waitForEvent("load"), pd.click("#hk-yes")]);
+  await pd.waitForTimeout(300);
+  check("引き継ぎ：止まったときの印が無ければ、残った記録へ戻しても控えを上書きしない", JSON.stringify(await dump(pd)) === want && (await pd.evaluate((g) => localStorage.getItem("hk-backup:" + g), game)) === b0);
+  if (await pd.locator("#hk-toast-close").count()) await pd.click("#hk-toast-close");
   // 入れ替えの前に開いていたタブは、古い記録で上書きしない（版10。sekai-jikoku #1・pikuto-yomi #1 の CodeRabbit）
   await pd.evaluate((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, before);
   await pd.reload();
@@ -243,6 +337,14 @@ export async function checkTransfer({ browser, url, game, sample, check, open })
   await old.evaluate((kv) => { try { localStorage.setItem(kv[0], kv[1]); } catch (e) { /* なし */ } }, [firstKey, before[firstKey]]).catch(() => {});
   await old.waitForTimeout(300);
   check("引き継ぎ：入れ替えの前に開いたタブは、古い記録で上書きしない", JSON.stringify(await dump(pd)) === want, JSON.stringify(await dump(pd)).slice(0, 80));
+  // 古いタブの保存を捨てたときは、帯で知らせる（読み直しが遅れても、黙って記録が消えない。版11、meirei-narabe #4 の CodeRabbit）
+  const old2 = watch(await D.newPage());
+  await old2.addInitScript(() => window.addEventListener("storage", (e) => e.stopImmediatePropagation(), true));
+  await old2.goto(url);
+  await old2.waitForTimeout(300);
+  await pd.evaluate((g) => localStorage.setItem("hk-sync:" + g, "ほかのタブで入れ替えた." + Date.now()), game);
+  const band = await old2.evaluate((k) => { try { localStorage.setItem(k, "{}"); } catch (e) { /* なし */ } const b = document.getElementById("hk-stale-tab"); return !!b && b.getAttribute("role") === "alert" && b.querySelector("button").getBoundingClientRect().height >= 44; }, firstKey).catch(() => false);
+  check("引き継ぎ：古いタブの保存を捨てたら、「保存できない・読み直して」の帯を出す（ボタンは44px以上）", band);
   await D.close();
 
   check("引き継ぎ：エラーが出ない", errors.length === 0, errors.join(" / "));

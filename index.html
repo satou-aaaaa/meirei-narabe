@@ -434,7 +434,7 @@ function moreList(r) {
   r.list.push(...add);
 }
 const starsOf = (m) => (m === 0 ? 3 : m === 1 ? 2 : 1); // m = まちがい＋ヒントの数
-const starStr = (s) => `<span class="stars" aria-label="星${s}つ">${"★".repeat(s)}<span class="off">${"★".repeat(3 - s)}</span></span>`;
+const starStr = (s) => `<span class="stars" role="img" aria-label="星${s}つ">${"★".repeat(s)}<span class="off" aria-hidden="true">${"☆".repeat(3 - s)}</span></span>`;
 
 // ---- 記録（この端末の localStorage だけ）----
 // days/hdays/adays：日付 → { m:[1問ごとのまちがい＋ヒント], k:[種類] }。adays はあとから遊んだ日（連続の日・今日の記録・Ko-fi には数えない）
