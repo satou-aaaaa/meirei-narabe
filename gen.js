@@ -43,7 +43,7 @@
         const c = list[i];
         if (c === "F") { steps++; if (blocked()) { bump = [x + DX[d], y + DY[d]]; return; } x += DX[d]; y += DY[d]; path.push([x, y]); fwd++; }
         else if (c === "R" || c === "L") { steps++; d = turn(d, c); }
-        else if (c && c.r) { for (let k = 0; k < c.r && !bump; k++) exec(c.b, false); }
+        else if (c && c.r) { for (let k = 0; k < c.r && !bump && steps <= cap; k++) { steps++; exec(c.b, false); } } // 1回ごとに数える（中が空でも、回数が大きすぎても止まる）
         else if (c && c.c) { steps++; exec(blocked() ? c.t : c.e, false); }
         else { bump = [x, y]; return; } // 空いた所は動かない
       }
@@ -334,7 +334,7 @@
 
   // 1問を作る。tag は key（「種類|番号」）。選び肢は key の種で並べ替える（2択・並びに意味のある選び肢 fix・A B C はそのまま）
   function make(tag) {
-    const q = BANK[tag]; if (!q) return null;
+    const q = Object.prototype.hasOwnProperty.call(BANK, tag) ? BANK[tag] : null; if (!q) return null;
     const k = BY[q.kind], opts = q.opts.length === 2 || q.fix || q.opts.every((o) => /^[ABC]$/.test(o)) ? q.opts.slice() : pickN(rng(seedOf(tag)), q.opts, q.opts.length);
     return { tag, kind: q.kind, lv: k.lv, name: k.name, look: k.look, scene: q.scene, text: q.text || "", opts, ans: q.ans, why: q.why, src: q.src.map((s) => SRC[s]) };
   }

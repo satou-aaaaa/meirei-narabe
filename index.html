@@ -490,7 +490,7 @@ function tidy(s) {
   for (const [b, n] of [[s.days, 5], [s.hdays, 3], [s.adays, 5]]) for (const d in b) if (!okDate(d) || !okRec(b[d], n)) delete b[d];
   for (const m in s.runs) {
     const r = s.runs[m]; if (r === null) continue;
-    if (typeof r !== "object" || r.mode !== (m.startsWith("a:") ? "a" : m) || (r.mode === "a" && m !== "a:" + r.date) || !okDate(r.date) || !Array.isArray(r.list) || !r.list.every(okTag) || !Array.isArray(r.res) || !r.res.every((x) => x && typeof x === "object" && Number.isInteger(x.m) && x.m >= 0)) { delete s.runs[m]; continue; }
+    if (typeof r !== "object" || !(["d", "h", "p", "e"].includes(m) || m.startsWith("a:")) || r.mode !== (m.startsWith("a:") ? "a" : m) || (r.mode === "a" && m !== "a:" + r.date) || !okDate(r.date) || !Array.isArray(r.list) || !r.list.every(okTag) || !Array.isArray(r.res) || !r.res.every((x) => x && typeof x === "object" && Number.isInteger(x.m) && x.m >= 0)) { delete s.runs[m]; continue; }
     if (r.cur != null && (typeof r.cur !== "object" || !Array.isArray(r.cur.wrong))) r.cur = null; else if (r.cur) r.cur.hints = num(r.cur.hints);
     delete r.life; // 前の形の「花」は読まない（とことんは、まちがえても続く）
   }
@@ -727,8 +727,10 @@ function choose(j) {
   }
   // 正解
   cur.done = true; buzz([10, 40, 10]);
-  const m = missOf(), st = starsOf(m), P = cur.P;
-  const s = save((s) => { const r = s.runs[MODE]; if (!same(r)) return; r.res.push({ m }); r.cur = null; s.dex[P.kind] = (s.dex[P.kind] || 0) + 1; if (r.mode === "e") s.ebest = Math.max(s.ebest || 0, r.res.filter((x) => x.m === 0).length); });
+  const P = cur.P;
+  // 別のタブで保存したヒント・まちがいも、採点の前に合わせる（2026-11-07 CodeRabbit）
+  const s = save((s) => { const r = s.runs[MODE]; if (!same(r)) return; const was = r.cur && r.cur.i === cur.i && r.cur.tag === cur.tag ? r.cur : null; if (was) { cur.hints = Math.max(cur.hints, was.hints || 0); for (const w of was.wrong || []) if (!cur.wrong.includes(w)) cur.wrong.push(w); } const m = missOf(); r.res.push({ m }); r.cur = null; s.dex[P.kind] = (s.dex[P.kind] || 0) + 1; if (r.mode === "e") s.ebest = Math.max(s.ebest || 0, r.res.filter((x) => x.m === 0).length); });
+  const m = missOf(), st = starsOf(m);
   const r = s.runs[MODE], fin = r && r.mode !== "e" && r.res.length >= r.list.length;
   document.querySelectorAll(".ch").forEach((b) => { b.disabled = true; if (P.opts[+b.dataset.j] === P.ans) { b.classList.add("ok"); b.setAttribute("aria-label", P.ans + "（正解）"); } });
   if ($("hint")) $("hint").disabled = true;
