@@ -711,7 +711,7 @@ function paint() {
   const cut = cutOf();
   document.querySelectorAll(".ch").forEach((b) => { const t = cur.P.opts[+b.dataset.j], ng = cur.wrong.includes(t) || cut.includes(t); b.classList.toggle("ng", ng); b.disabled = ng || cur.done; b.setAttribute("aria-label", t + (ng ? "（ちがう）" : "")); });
   const h = $("hint"); if (h) h.disabled = cur.done || cur.hints >= (cur.P.opts.length > 2 ? 2 : 1);
-  $("hintbox").innerHTML = cur.hints && !cur.done ? `<div class="hint" role="status">💡 ${esc(cur.P.look)}${cur.hints >= 2 ? "<br>💡 ちがう選び肢を消しました。のこりは2つです。" : ""}</div>` : "";
+  $("hintbox").innerHTML = cur.hints && !cur.done ? `<div class="hint" role="status">💡 ${esc(cur.P.look)}${cur.hints >= 2 ? `<br>💡 ちがう選び肢を消しました。のこりは${cur.P.opts.filter((x) => !cutOf().includes(x) && !cur.wrong.includes(x)).length}つです。` : ""}</div>` : "";
 }
 function hint() {
   if (cur.done || cur.hints >= 2) return;
