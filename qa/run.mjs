@@ -229,14 +229,19 @@ try {
   await solve(p);
   check("正解すると ✓ の印・なぜの説明・出典のリンク・★2（まちがい1回）", await p.locator(".ch.ok").count() === 1 && (await p.textContent(".verdict .why")).length > 6 && await p.locator(".verdict .src a").count() >= 1 && (await p.getAttribute(".verdict .stars", "aria-label")) === "星2つ");
   await p.click("#next");
+  check("次の問題へ進むと、問題文にフォーカスが移る（キーボード・読み上げ）", await p.evaluate(() => document.activeElement?.id) === "q");
   await p.click("#hint");
   check("ヒント1は見るところを言う（答えは言わない）", (await p.textContent("#hintbox")).includes("💡") && await p.locator(".ch.ng").count() === 0);
   const nOpt = await p.locator(".ch").count();
-  if (nOpt > 2) { await p.click("#hint"); check("ヒント2はまちがいの選び肢を消し、2つにしぼる・ヒントは2回まで", await p.locator(".ch:not(.ng)").count() === 2 && await p.locator("#hint:disabled").count() === 1); }
+  if (nOpt > 2) {
+    await p.click("#hint"); check("ヒント2はまちがいの選び肢を消し、2つにしぼる・ヒントは2回まで", await p.locator(".ch:not(.ng)").count() === 2 && await p.locator("#hint:disabled").count() === 1);
+    await p.click(`.ch:not(.ng)[data-j="${await p.evaluate(() => { const c = __km.cur(); return c.P.opts.findLastIndex((o) => o !== c.P.ans); })}"]`);
+    check("ヒント2のあとで残ったまちがいを選んでも、消した選び肢は戻らない（正解だけが残る）", await p.locator(".ch:not(.ng)").count() === 1);
+  }
   else check("選び肢が2つの問題は、ヒントは1回まで（しぼる段は無い）", await p.locator("#hint:disabled").count() === 1);
-  const h2 = nOpt > 2 ? 2 : 1;
+  const h2 = nOpt > 2 ? 3 : 1; // ヒント2回＋しぼったあとのまちがい1回
   await solve(p);
-  check("ヒントの数だけ★がへる", (await p.getAttribute(".verdict .stars", "aria-label")) === `星${h2 === 2 ? 1 : 2}つ`);
+  check("ヒントの数だけ★がへる", (await p.getAttribute(".verdict .stars", "aria-label")) === `星${h2 >= 2 ? 1 : 2}つ`);
   await p.click("#next");
   for (let i = 2; i < 5; i++) { await solve(p); await p.click("#next"); }
   await p.waitForTimeout(150);
