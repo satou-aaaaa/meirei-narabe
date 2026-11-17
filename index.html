@@ -364,22 +364,24 @@ html.a11y-say body{padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))!i
 <script id="game-store">
 // 保存の読み直し（2つの写しを合わせる）の共通部品。ひな形: satou-aaaaa/shared-workflows の template/store/store.js。
 // ゲームでは直さない。index.html の store:begin〜store:end の印のあいだに node scripts/sync-template.mjs <ゲームのフォルダ> で写す（ファイルを足さないので sw.js の SHELL は変えない）。
-// 共通部品の版: 1（上げたら写しの版も上がる。scripts/drift-check.mjs がずれを週次まとめに出す）
+// 共通部品の版: 2（上げたら写しの版も上がる。scripts/drift-check.mjs がずれを週次まとめに出す）
 //   1: とことんを終えた保存が失敗したあと、読み直しで古い回が戻る不具合が73本に広がっていた（incidents/2026-11-17-endless-revive-after-save-failure.md）。
 //      load() の合わせ方を1か所に集め、直すときはここだけ直す。
+//   2: 終えた回の id を s.gone に持つゲーム（震度よみ型）で、新しい写しに残った終えた回が消えなかった（hataraku-kimari #1 で発見）。
+//      片方が null の回が、どちらかの写しの gone（既定は gone[r.id]）にあれば、どちらの写しにあっても null にする。
 // 使い方（ゲームの load()）:
 //   function load() { return GameStore.load(KEY, mem, { v: 1, fresh, tidy, bank, doneOf, bookOf, objs: ["days", "runs"] }); }
 // 決まり（どのゲームでも同じ。変えるときはここと scripts/check-store.mjs を直す）:
 //   - 2つの写し（localStorage と、保存に失敗したときの mem）を時刻 t で新しい n・古い o に分ける。
 //   - 数は多いほう・true は残す・入れ物は両方を合わせて数は多いほう（field で変えられる）。
 //   - 途中経過 runs はモードごと。片方が null（その回を終えた）なら、もう片方の回は
-//     済んでいる・記録帳にある・とことん（ended）なら戻さない。
+//     済んでいる・記録帳にある・とことん（ended）なら戻さない。終えた回の印 gone にあれば、新しい写しにあっても消す。
 //   - 別の回どうしなら日付の新しいほう（同じ日は n）。古いほうは bank で記録へ入れる。
 //   - 同じ回なら進み具合 prog の大きいほう（同じなら n）。join で両方の印を合わせられる。
 (function (root) {
   "use strict";
   const isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
-  const VER = 1;
+  const VER = 2;
 
   // 1つの写しを読む（読めない・形がちがう・版がちがうときは null）
   function parse(text, v) {
@@ -423,7 +425,7 @@ html.a11y-say body{padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))!i
     for (const m of new Set([...Object.keys(ra), ...Object.keys(rb)])) {
       const x = ra[m], y = rb[m];
       if (x === undefined || y === undefined) { if (x || y) s.runs[m] = x || y; continue; }
-      if (!x || !y) { const r = x || y; if (revive(s, r, m, n, opt)) s.runs[m] = r; continue; }
+      if (!x || !y) { const r = x || y; if (r && [s, a, b].some((q) => opt.gone(q, r))) s.runs[m] = null; else if (revive(s, r, m, n, opt)) s.runs[m] = r; continue; }
       if (!opt.same(x, y, m)) {
         if (opt.differ) { opt.differ(s, x, y, m, n); continue; }
         const dx = x.date || "", dy = y.date || "";
@@ -442,7 +444,7 @@ html.a11y-say body{padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))!i
   function merge(a, b, opt) {
     opt = Object.assign({
       tidy: (s) => s, objs: [], bank: () => false, doneOf: () => false, bookOf: () => null, strictBook: false,
-      ended: (r) => r.mode === "e", same: (x, y) => x.id === y.id, prog: progOf, bankTie: false,
+      ended: (r) => r.mode === "e", gone: (s, r) => isObj(s.gone) && !!s.gone[r.id], same: (x, y) => x.id === y.id, prog: progOf, bankTie: false,
     }, opt);
     if (typeof opt.fresh !== "function") throw new Error("GameStore: fresh が要る");
     a = isObj(a) && a.v === opt.v ? a : null;
