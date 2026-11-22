@@ -14,7 +14,7 @@ import { checkSwStall } from "./sw-check.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const results = [];
 const check = (name, ok, detail = "") => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 400) });
-const firstClose = async (q) => { if (await q.locator("#howto[open]").count()) await q.click("#howto-ok"); if (await q.locator("#core-coach").count()) { await q.evaluate(() => Core.coach.leave()); await q.waitForTimeout(100); } }; // はじめての練習の吹き出しをやめてホームへ（sync-template の migrateFirstQa が足した）
+const firstClose = async (q) => { if (await q.locator("#howto[open]").count()) await q.click("#howto-ok"); if (await q.evaluate(() => !!(window.Core && Core.coach && Core.coach.active()))) { await q.evaluate(() => { Core.coach.leave(); scrollTo(0, 0); }); await q.waitForTimeout(100); } }; // はじめての練習の吹き出しをやめてホームへ（sync-template の migrateFirstQa が足した）
 const G = createRequire(import.meta.url)(path.join(root, "gen.js"));
 
 // ---- 0. ロボットを、gen.js とは別の作り方で動かす（命令を先に1列の手順に開いてから、1つずつ行う）----
@@ -475,7 +475,7 @@ try {
     await pw.goto(url); await firstClose(pw); await pw.waitForTimeout(2000);
     check("保存できないときは、帯 #savewarn がちょうど1つ出て、2秒たっても残る", (await pw.locator("#savewarn").count()) === 1, await pw.locator("#savewarn").count());
     await pw.evaluate(() => { Storage.prototype.setItem = window.__origSetItem; });
-    await firstClose(pw).then(() => pw.click("#f-how")); await firstClose(pw);
+    await firstClose(pw).then(() => pw.evaluate(() => openHow())); await firstClose(pw);
     check("保存できるようになって次に保存すると、帯 #savewarn が消える", (await pw.locator("#savewarn").count()) === 0);
     await pw.close(); }
 } catch (e) {
