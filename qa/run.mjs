@@ -192,7 +192,7 @@ async function solve(p, { wrong = 0 } = {}) {
 try {
   // はじめて：遊び方が出る・文字の大きさ
   const p = await newPage();
-  check("はじめて開くと遊び方が出る", await p.locator("#core-coach").count() === 1);
+  check("はじめて開くと遊び方が出る", await p.locator("#core-coach").waitFor({ timeout: 3000 }).then(() => true, () => false));
   await firstClose(p);
   {
     const q = await newPage();
